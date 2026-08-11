@@ -1,15 +1,38 @@
 // ==UserScript==
 // @name         GitHub Social Preview Card in About Sidebar
-// @namespace    master3307/github-repo-card
+// @namespace    https://github.com/
 // @version      1.4.0
-// @description  Adds the repository's Open Graph social-preview image directly below the About heading.
-// @match        https://github.com/*
+// @author       MrKoby07
+// @description  Adds a repository social-preview image card directly below the About heading on GitHub repository home pages
+// @license      MIT
+// @match        https://github.com/*/*
+// @match        https://github.com/*/*/
+// @exclude      https://github.com/*/*/blob/*
+// @exclude      https://github.com/*/*/tree/*
+// @exclude      https://github.com/*/*/issues*
+// @exclude      https://github.com/*/*/pull*
+// @exclude      https://github.com/*/*/actions*
+// @exclude      https://github.com/*/*/projects*
+// @exclude      https://github.com/*/*/wiki*
+// @exclude      https://github.com/*/*/settings*
+// @exclude      https://github.com/*/*/security*
+// @exclude      https://github.com/*/*/network*
+// @exclude      https://github.com/*/*/stargazers*
+// @exclude      https://github.com/*/*/watchers*
+// @exclude      https://github.com/*/*/forks*
+// @exclude      https://github.com/*/*/releases*
+// @exclude      https://github.com/*/*/tags*
+// @exclude      https://github.com/*/*/commits*
+// @exclude      https://github.com/*/*/branches*
+// @exclude      https://github.com/*/*/compare/*
+// @run-at       document-idle
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @connect      api.github.com
+// @icon         https://github.com/favicon.ico
 // ==/UserScript==
 
 (() => {
