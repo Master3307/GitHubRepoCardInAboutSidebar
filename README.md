@@ -2,6 +2,8 @@
 
 <p align="center">Adds the repository's Open Graph social-preview image directly below the About heading.</p>
 
+<img src="screenshots/preview.png" style="height: 250px;">
+
 <strong>🔗・Links</strong>
 - [Install (Raw)](https://github.com/Master3307/GitHubRepoCardInAboutSidebar/raw/refs/heads/master/githubrepocardinaboutsidebar.user.js)
 - [Greasy Fork](https://greasyfork.org/en/scripts/590854-github-social-preview-card-in-about-sidebar)
