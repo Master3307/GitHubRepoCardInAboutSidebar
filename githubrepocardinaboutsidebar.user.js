@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Social Preview Card in About Sidebar
 // @namespace    master3307/github-repo-card
-// @version      1.1.0
-// @description  Adds the GitHub social-preview image beneath the About sidebar section.
+// @version      1.2.0
+// @description  Adds the repository's Open Graph social-preview image beneath the About sidebar section.
 // @match        https://github.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -111,8 +111,8 @@
   function getCurrentRepository() {
     const parts = location.pathname.split("/").filter(Boolean);
 
-    // Only run on a repository root: /owner/repository
-    // Ignore /issues, /pulls, /blob, /settings, and similar routes.
+    // Only run at /owner/repository.
+    // Ignore /issues, /pulls, /blob, /settings, and other subpages.
     if (parts.length !== 2) return null;
 
     const [owner, repo] = parts;
@@ -210,6 +210,25 @@
     return element;
   }
 
+  function getPageSocialPreviewUrl() {
+    const selectors = [
+      'meta[property="og:image"]',
+      'meta[property="og:image:secure_url"]',
+      'meta[name="twitter:image"]',
+      'meta[name="twitter:image:src"]',
+    ];
+
+    for (const selector of selectors) {
+      const imageUrl = document.querySelector(selector)?.content?.trim();
+
+      if (imageUrl) {
+        return imageUrl;
+      }
+    }
+
+    return null;
+  }
+
   function makeCard(repository) {
     const card = document.createElement("div");
     card.id = CARD_ID;
@@ -226,9 +245,12 @@
     preview.alt = `${repository.full_name} social preview`;
     preview.loading = "lazy";
 
-    // The image GitHub uses for Open Graph/social embeds.
-    // The fallback produces GitHub's generated repository card.
+    // This comes directly from GitHub's <meta property="og:image"> tag.
+    // It should therefore match the image GitHub uses when embedding this repo.
+    const pageSocialPreview = getPageSocialPreviewUrl();
+
     preview.src =
+      pageSocialPreview ||
       repository.social_preview_image_url ||
       `https://opengraph.githubassets.com/1/${repository.full_name}`;
 
@@ -345,7 +367,10 @@
     setToken(nextToken);
 
     const card = document.getElementById(CARD_ID);
-    if (card) card.remove();
+
+    if (card) {
+      card.remove();
+    }
 
     injectCard();
   }
