@@ -3,7 +3,7 @@
 <p align="center">Adds the repository's Open Graph social-preview image directly below the About heading.</p>
 
 <p align="center">
-  <img src="screenshots/clean1.png" alt="Preview"><img src="screenshots/clean2.png" alt="Preview">
+  <a href="https://github.com/Master3307/HomeSite"><img src="screenshots/clean1.png" alt="Preview"></a><a href="https://github.com/Master3307/masterrc"><img src="screenshots/clean2.png" alt="Preview"></a>
 </p>
 
 <strong>🔗・Links</strong>
