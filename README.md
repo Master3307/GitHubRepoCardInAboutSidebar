@@ -6,6 +6,12 @@
   <a href="https://github.com/Master3307/HomeSite"><img src="screenshots/clean1.png" alt="Preview"></a><a href="https://github.com/Master3307/masterrc"><img src="screenshots/clean2.png" alt="Preview"></a>
 </p>
 
+<strong>📄・Description</strong>
+
+This UserScript displays the Social Preview that you see on sites for example Discord below the link of the Repo.
+
+The two examples above show what it would look like in the About section of any Repository for example.
+
 <strong>🔗・Links</strong>
 - [Install (Raw)](https://github.com/Master3307/GitHubRepoCardInAboutSidebar/raw/refs/heads/master/githubrepocardinaboutsidebar.user.js)
 - [Greasy Fork](https://greasyfork.org/en/scripts/590854-github-social-preview-card-in-about-sidebar)
