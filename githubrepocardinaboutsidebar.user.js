@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub Social Preview Card in About Sidebar
 // @namespace    master3307/github-repo-card
-// @version      1.3.0
-// @description  Adds the repository's Open Graph social-preview image beneath the About sidebar section.
+// @version      1.4.0
+// @description  Adds the repository's Open Graph social-preview image directly below the About heading.
 // @match        https://github.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -22,7 +22,7 @@
 
   GM_addStyle(`
       #${CARD_ID} {
-        margin-top: 16px;
+        margin: 8px 0 16px;
         overflow: hidden;
         border: 1px solid var(--borderColor-default, #30363d);
         border-radius: 13px;
@@ -255,8 +255,6 @@
 
     const previewLink = document.createElement("a");
     previewLink.className = "ghrc-preview-link";
-
-    // Clicking the preview image opens the raw image in a new tab.
     previewLink.href = imageUrl;
     previewLink.target = "_blank";
     previewLink.rel = "noopener noreferrer";
@@ -328,16 +326,10 @@
     return card;
   }
 
-  function findAboutSection() {
+  function findAboutHeading() {
     const headings = [...document.querySelectorAll("h2")];
 
-    const aboutHeading = headings.find(
-      (heading) => heading.textContent.trim() === "About",
-    );
-
-    return aboutHeading?.closest(
-      ".SidebarSection-module__sidebarSection__e8jFN",
-    );
+    return headings.find((heading) => heading.textContent.trim() === "About");
   }
 
   async function injectCard() {
@@ -345,15 +337,17 @@
 
     if (!current || document.getElementById(CARD_ID)) return;
 
-    const aboutSection = findAboutSection();
-    if (!aboutSection) return;
+    const aboutHeading = findAboutHeading();
+    if (!aboutHeading) return;
 
     const placeholder = document.createElement("div");
     placeholder.id = CARD_ID;
     placeholder.className = "ghrc-error";
     placeholder.textContent = "Loading social preview…";
 
-    aboutSection.append(placeholder);
+    // Place the card directly after the About heading.
+    // This puts it before the repository description and every other sidebar item.
+    aboutHeading.insertAdjacentElement("afterend", placeholder);
 
     try {
       const repository = await fetchRepository(current.owner, current.repo);
