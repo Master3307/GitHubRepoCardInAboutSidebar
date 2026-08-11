@@ -10,3 +10,6 @@
 - [Install (Raw)](https://github.com/Master3307/GitHubRepoCardInAboutSidebar/raw/refs/heads/master/githubrepocardinaboutsidebar.user.js)
 - [Greasy Fork](https://greasyfork.org/en/scripts/590854-github-social-preview-card-in-about-sidebar)
 - [OpenUserJS](https://openuserjs.org/scripts/MrKoby07/GitHub_Social_Preview_Card_in_About_Sidebar)
+
+<strong>📦・Related</strong>
+- [GitHub Readme On Top Of Files](https://github.com/Master3307/GitHubReadmeOnTopOfFiles)
