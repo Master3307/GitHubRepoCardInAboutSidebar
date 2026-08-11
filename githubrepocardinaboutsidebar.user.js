@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Social Preview Card in About Sidebar
 // @namespace    https://github.com/
-// @version      1.5.0
+// @version      1.6.0
 // @author       MrKoby07
 // @description  Adds a repository social-preview image card directly below the About heading on GitHub repository home pages
 // @license      MIT
@@ -44,107 +44,112 @@
 
   const TOKEN_KEY = "github_repo_card_token";
   const TOKEN_BUTTON_VISIBLE_KEY = "github_repo_card_token_button_visible";
+  const FOOTER_VISIBLE_KEY = "github_repo_card_footer_visible";
   const CARD_ID = "master3307-github-repo-card";
   const CACHE_PREFIX = "github_repo_card_cache:";
   const CACHE_TTL_MS = 15 * 60 * 1000;
 
   GM_addStyle(`
-      #${CARD_ID} {
-        margin: 8px 0 16px;
-        overflow: hidden;
-        border: 1px solid var(--borderColor-default, #30363d);
-        border-radius: 13px;
-        background: var(--bgColor-muted, #161b22);
-        color: var(--fgColor-default, #f0f6fc);
-        transition: border-color 120ms ease, background-color 120ms ease;
-      }
+    #${CARD_ID} {
+      margin: 8px 0 16px;
+      overflow: hidden;
+      border: 1px solid var(--borderColor-default, #30363d);
+      border-radius: 13px;
+      background: var(--bgColor-muted, #161b22);
+      color: var(--fgColor-default, #f0f6fc);
+      transition: border-color 120ms ease, background-color 120ms ease;
+    }
 
-      #${CARD_ID}:hover {
-        border-color: var(--borderColor-accent-emphasis, #1f6feb);
-        background: var(--bgColor-neutral-muted, #21262d);
-      }
+    #${CARD_ID}:hover {
+      border-color: var(--borderColor-accent-emphasis, #1f6feb);
+      background: var(--bgColor-neutral-muted, #21262d);
+    }
 
-      #${CARD_ID} .ghrc-preview-link {
-        display: block;
-        color: inherit;
-        text-decoration: none;
-      }
+    #${CARD_ID} .ghrc-preview-link {
+      display: block;
+      color: inherit;
+      text-decoration: none;
+    }
 
-      #${CARD_ID} .ghrc-preview-link:hover .ghrc-preview {
-        filter: brightness(0.92);
-      }
+    #${CARD_ID} .ghrc-preview-link:hover .ghrc-preview {
+      filter: brightness(0.92);
+    }
 
-      #${CARD_ID} .ghrc-preview {
-        display: block;
-        width: 100%;
-        aspect-ratio: 2 / 1;
-        background: var(--bgColor-inset, #010409);
-        object-fit: cover;
-        transition: filter 120ms ease;
-      }
+    #${CARD_ID} .ghrc-preview {
+      display: block;
+      width: 100%;
+      aspect-ratio: 2 / 1;
+      background: var(--bgColor-inset, #010409);
+      object-fit: cover;
+      transition: filter 120ms ease;
+    }
 
-      #${CARD_ID} .ghrc-preview[hidden] {
-        display: none;
-      }
+    #${CARD_ID} .ghrc-preview[hidden] {
+      display: none;
+    }
 
-      #${CARD_ID} .ghrc-footer {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        min-width: 0;
-        padding: 9px 10px;
-        border-top: 1px solid var(--borderColor-default, #30363d);
-      }
+    #${CARD_ID} .ghrc-footer {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      padding: 9px 10px;
+      border-top: 1px solid var(--borderColor-default, #30363d);
+    }
 
-      #${CARD_ID} .ghrc-name {
-        min-width: 0;
-        overflow: hidden;
-        color: var(--fgColor-default, #f0f6fc);
-        font-size: 12px;
-        font-weight: 600;
-        line-height: 18px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
+    #${CARD_ID} .ghrc-footer[hidden] {
+      display: none;
+    }
 
-      #${CARD_ID} .ghrc-name:hover {
-        color: var(--fgColor-accent, #58a6ff);
-        text-decoration: none;
-      }
+    #${CARD_ID} .ghrc-name {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--fgColor-default, #f0f6fc);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 18px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
-      #${CARD_ID} .ghrc-private {
-        flex: 0 0 auto;
-        padding: 1px 5px;
-        border: 1px solid var(--borderColor-default, #30363d);
-        border-radius: 999px;
-        color: var(--fgColor-muted, #8b949e);
-        font-size: 10px;
-        line-height: 14px;
-      }
+    #${CARD_ID} .ghrc-name:hover {
+      color: var(--fgColor-accent, #58a6ff);
+      text-decoration: none;
+    }
 
-      #${CARD_ID} .ghrc-settings {
-        flex: 0 0 auto;
-        margin-left: auto;
-        padding: 0;
-        border: 0;
-        color: var(--fgColor-muted, #8b949e);
-        background: transparent;
-        cursor: pointer;
-        font-size: 11px;
-        line-height: 18px;
-      }
+    #${CARD_ID} .ghrc-private {
+      flex: 0 0 auto;
+      padding: 1px 5px;
+      border: 1px solid var(--borderColor-default, #30363d);
+      border-radius: 999px;
+      color: var(--fgColor-muted, #8b949e);
+      font-size: 10px;
+      line-height: 14px;
+    }
 
-      #${CARD_ID} .ghrc-settings:hover {
-        color: var(--fgColor-accent, #58a6ff);
-      }
+    #${CARD_ID} .ghrc-settings {
+      flex: 0 0 auto;
+      margin-left: auto;
+      padding: 0;
+      border: 0;
+      color: var(--fgColor-muted, #8b949e);
+      background: transparent;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 18px;
+    }
 
-      #${CARD_ID} .ghrc-error {
-        padding: 13px;
-        color: var(--fgColor-muted, #8b949e);
-        font-size: 12px;
-        line-height: 18px;
-      }
-    `);
+    #${CARD_ID} .ghrc-settings:hover {
+      color: var(--fgColor-accent, #58a6ff);
+    }
+
+    #${CARD_ID} .ghrc-error {
+      padding: 13px;
+      color: var(--fgColor-muted, #8b949e);
+      font-size: 12px;
+      line-height: 18px;
+    }
+  `);
 
   function getCurrentRepository() {
     const parts = location.pathname.split("/").filter(Boolean);
@@ -189,6 +194,26 @@
 
     if (tokenButton) {
       tokenButton.hidden = !shouldShow;
+    }
+  }
+
+  function isFooterVisible() {
+    return GM_getValue(FOOTER_VISIBLE_KEY, true);
+  }
+
+  function setFooterVisible(visible) {
+    GM_setValue(FOOTER_VISIBLE_KEY, visible);
+  }
+
+  function toggleFooterVisibility() {
+    const shouldShow = !isFooterVisible();
+
+    setFooterVisible(shouldShow);
+
+    const footer = document.querySelector(`#${CARD_ID} .ghrc-footer`);
+
+    if (footer) {
+      footer.hidden = !shouldShow;
     }
   }
 
@@ -322,6 +347,7 @@
 
     const footer = document.createElement("div");
     footer.className = "ghrc-footer";
+    footer.hidden = !isFooterVisible();
 
     const repoLink = document.createElement("a");
     repoLink.className = "ghrc-name";
@@ -431,6 +457,8 @@
 
     injectCard();
   }
+
+  GM_registerMenuCommand("Toggle footer visibility", toggleFooterVisibility);
 
   GM_registerMenuCommand(
     "Toggle Token button visibility",
