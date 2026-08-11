@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Social Preview Card in About Sidebar
 // @namespace    master3307/github-repo-card
-// @version      1.2.0
+// @version      1.3.0
 // @description  Adds the repository's Open Graph social-preview image beneath the About sidebar section.
 // @match        https://github.com/*
 // @grant        GM_getValue
@@ -42,12 +42,17 @@
         text-decoration: none;
       }
 
+      #${CARD_ID} .ghrc-preview-link:hover .ghrc-preview {
+        filter: brightness(0.92);
+      }
+
       #${CARD_ID} .ghrc-preview {
         display: block;
         width: 100%;
         aspect-ratio: 2 / 1;
         background: var(--bgColor-inset, #010409);
         object-fit: cover;
+        transition: filter 120ms ease;
       }
 
       #${CARD_ID} .ghrc-preview[hidden] {
@@ -72,6 +77,11 @@
         line-height: 18px;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      #${CARD_ID} .ghrc-name:hover {
+        color: var(--fgColor-accent, #58a6ff);
+        text-decoration: none;
       }
 
       #${CARD_ID} .ghrc-private {
@@ -229,30 +239,34 @@
     return null;
   }
 
+  function getSocialPreviewUrl(repository) {
+    return (
+      getPageSocialPreviewUrl() ||
+      repository.social_preview_image_url ||
+      `https://opengraph.githubassets.com/1/${repository.full_name}`
+    );
+  }
+
   function makeCard(repository) {
     const card = document.createElement("div");
     card.id = CARD_ID;
 
+    const imageUrl = getSocialPreviewUrl(repository);
+
     const previewLink = document.createElement("a");
     previewLink.className = "ghrc-preview-link";
-    previewLink.href = repository.html_url;
+
+    // Clicking the preview image opens the raw image in a new tab.
+    previewLink.href = imageUrl;
     previewLink.target = "_blank";
     previewLink.rel = "noopener noreferrer";
-    previewLink.title = `Open ${repository.full_name}`;
+    previewLink.title = "Open social-preview image";
 
     const preview = document.createElement("img");
     preview.className = "ghrc-preview";
+    preview.src = imageUrl;
     preview.alt = `${repository.full_name} social preview`;
     preview.loading = "lazy";
-
-    // This comes directly from GitHub's <meta property="og:image"> tag.
-    // It should therefore match the image GitHub uses when embedding this repo.
-    const pageSocialPreview = getPageSocialPreviewUrl();
-
-    preview.src =
-      pageSocialPreview ||
-      repository.social_preview_image_url ||
-      `https://opengraph.githubassets.com/1/${repository.full_name}`;
 
     preview.addEventListener("error", () => {
       preview.hidden = true;
