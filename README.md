@@ -3,7 +3,7 @@
 <p align="center">Adds the repository's Open Graph social-preview image directly below the About heading.</p>
 
 <p align="center">
-  <img src="screenshots/previewAlt.png" style="height: 250px;" alt="Preview">
+  <img src="screenshots/clean1.png" style="height: 250px;" alt="Preview"><img src="screenshots/clean2.png" style="height: 250px;" alt="Preview">
 </p>
 
 <strong>🔗・Links</strong>
