@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Social Preview Card in About Sidebar
 // @namespace    https://github.com/
-// @version      1.4.0
+// @version      1.5.0
 // @author       MrKoby07
 // @description  Adds a repository social-preview image card directly below the About heading on GitHub repository home pages
 // @license      MIT
@@ -43,6 +43,7 @@
   "use strict";
 
   const TOKEN_KEY = "github_repo_card_token";
+  const TOKEN_BUTTON_VISIBLE_KEY = "github_repo_card_token_button_visible";
   const CARD_ID = "master3307-github-repo-card";
   const CACHE_PREFIX = "github_repo_card_cache:";
   const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -169,6 +170,26 @@
 
   function setToken(token) {
     GM_setValue(TOKEN_KEY, token.trim());
+  }
+
+  function isTokenButtonVisible() {
+    return GM_getValue(TOKEN_BUTTON_VISIBLE_KEY, true);
+  }
+
+  function setTokenButtonVisible(visible) {
+    GM_setValue(TOKEN_BUTTON_VISIBLE_KEY, visible);
+  }
+
+  function toggleTokenButtonVisibility() {
+    const shouldShow = !isTokenButtonVisible();
+
+    setTokenButtonVisible(shouldShow);
+
+    const tokenButton = document.querySelector(`#${CARD_ID} .ghrc-settings`);
+
+    if (tokenButton) {
+      tokenButton.hidden = !shouldShow;
+    }
   }
 
   function cacheKey(fullName) {
@@ -321,6 +342,7 @@
     settings.className = "ghrc-settings";
     settings.textContent = "Token";
     settings.title = "Configure GitHub token";
+    settings.hidden = !isTokenButtonVisible();
 
     settings.addEventListener("click", () => {
       configureToken();
@@ -409,6 +431,11 @@
 
     injectCard();
   }
+
+  GM_registerMenuCommand(
+    "Toggle Token button visibility",
+    toggleTokenButtonVisibility,
+  );
 
   GM_registerMenuCommand("Configure GitHub repo-card token", configureToken);
 
