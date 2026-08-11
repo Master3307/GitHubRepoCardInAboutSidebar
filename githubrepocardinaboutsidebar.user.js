@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         GitHub Repo Card in About Sidebar
+// @name         GitHub Social Preview Card in About Sidebar
 // @namespace    master3307/github-repo-card
-// @version      1.0.0
-// @description  Adds a GitHub API-powered repository card beneath the About sidebar section.
+// @version      1.1.0
+// @description  Adds the GitHub social-preview image beneath the About sidebar section.
 // @match        https://github.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -22,55 +22,54 @@
 
   GM_addStyle(`
       #${CARD_ID} {
-        display: block;
         margin-top: 16px;
-        padding: 13px;
+        overflow: hidden;
         border: 1px solid var(--borderColor-default, #30363d);
         border-radius: 13px;
         background: var(--bgColor-muted, #161b22);
         color: var(--fgColor-default, #f0f6fc);
-        text-decoration: none;
         transition: border-color 120ms ease, background-color 120ms ease;
       }
 
       #${CARD_ID}:hover {
         border-color: var(--borderColor-accent-emphasis, #1f6feb);
         background: var(--bgColor-neutral-muted, #21262d);
+      }
+
+      #${CARD_ID} .ghrc-preview-link {
+        display: block;
+        color: inherit;
         text-decoration: none;
       }
 
-      #${CARD_ID} .ghrc-top {
-        display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        min-width: 0;
+      #${CARD_ID} .ghrc-preview {
+        display: block;
+        width: 100%;
+        aspect-ratio: 2 / 1;
+        background: var(--bgColor-inset, #010409);
+        object-fit: cover;
       }
 
-      #${CARD_ID} .ghrc-avatar {
-        flex: 0 0 auto;
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
+      #${CARD_ID} .ghrc-preview[hidden] {
+        display: none;
       }
 
-      #${CARD_ID} .ghrc-main {
-        min-width: 0;
-        flex: 1;
-      }
-
-      #${CARD_ID} .ghrc-name-row {
+      #${CARD_ID} .ghrc-footer {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 7px;
         min-width: 0;
+        padding: 9px 10px;
+        border-top: 1px solid var(--borderColor-default, #30363d);
       }
 
       #${CARD_ID} .ghrc-name {
+        min-width: 0;
         overflow: hidden;
         color: var(--fgColor-default, #f0f6fc);
-        font-size: 14px;
+        font-size: 12px;
         font-weight: 600;
-        line-height: 20px;
+        line-height: 18px;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
@@ -81,46 +80,20 @@
         border: 1px solid var(--borderColor-default, #30363d);
         border-radius: 999px;
         color: var(--fgColor-muted, #8b949e);
-        font-size: 11px;
-        line-height: 16px;
-      }
-
-      #${CARD_ID} .ghrc-description {
-        display: -webkit-box;
-        margin-top: 7px;
-        overflow: hidden;
-        color: var(--fgColor-muted, #8b949e);
-        font-size: 12px;
-        line-height: 18px;
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 2;
-      }
-
-      #${CARD_ID} .ghrc-stats {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 9px;
-        margin-top: 10px;
-        color: var(--fgColor-muted, #8b949e);
-        font-size: 12px;
-        line-height: 16px;
-      }
-
-      #${CARD_ID} .ghrc-language {
-        max-width: 125px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        font-size: 10px;
+        line-height: 14px;
       }
 
       #${CARD_ID} .ghrc-settings {
-        float: right;
+        flex: 0 0 auto;
+        margin-left: auto;
         padding: 0;
         border: 0;
         color: var(--fgColor-muted, #8b949e);
         background: transparent;
         cursor: pointer;
-        font-size: 12px;
+        font-size: 11px;
+        line-height: 18px;
       }
 
       #${CARD_ID} .ghrc-settings:hover {
@@ -128,6 +101,7 @@
       }
 
       #${CARD_ID} .ghrc-error {
+        padding: 13px;
         color: var(--fgColor-muted, #8b949e);
         font-size: 12px;
         line-height: 18px;
@@ -137,8 +111,8 @@
   function getCurrentRepository() {
     const parts = location.pathname.split("/").filter(Boolean);
 
-    // A repository root is exactly /owner/repository.
-    // Do not inject on /owner/repo/issues, /blob/, /settings, etc.
+    // Only run on a repository root: /owner/repository
+    // Ignore /issues, /pulls, /blob, /settings, and similar routes.
     if (parts.length !== 2) return null;
 
     const [owner, repo] = parts;
@@ -236,80 +210,63 @@
     return element;
   }
 
-  function formatNumber(value) {
-    return new Intl.NumberFormat(undefined, {
-      notation: "compact",
-      maximumFractionDigits: 1,
-    }).format(value || 0);
-  }
-
   function makeCard(repository) {
-    const card = document.createElement("a");
+    const card = document.createElement("div");
     card.id = CARD_ID;
-    card.href = repository.html_url;
-    card.target = "_blank";
-    card.rel = "noopener noreferrer";
-    card.title = `Open ${repository.full_name}`;
+
+    const previewLink = document.createElement("a");
+    previewLink.className = "ghrc-preview-link";
+    previewLink.href = repository.html_url;
+    previewLink.target = "_blank";
+    previewLink.rel = "noopener noreferrer";
+    previewLink.title = `Open ${repository.full_name}`;
+
+    const preview = document.createElement("img");
+    preview.className = "ghrc-preview";
+    preview.alt = `${repository.full_name} social preview`;
+    preview.loading = "lazy";
+
+    // The image GitHub uses for Open Graph/social embeds.
+    // The fallback produces GitHub's generated repository card.
+    preview.src =
+      repository.social_preview_image_url ||
+      `https://opengraph.githubassets.com/1/${repository.full_name}`;
+
+    preview.addEventListener("error", () => {
+      preview.hidden = true;
+    });
+
+    previewLink.append(preview);
+
+    const footer = document.createElement("div");
+    footer.className = "ghrc-footer";
+
+    const repoLink = document.createElement("a");
+    repoLink.className = "ghrc-name";
+    repoLink.href = repository.html_url;
+    repoLink.target = "_blank";
+    repoLink.rel = "noopener noreferrer";
+    repoLink.textContent = repository.full_name;
+    repoLink.title = `Open ${repository.full_name}`;
+
+    footer.append(repoLink);
+
+    if (repository.private) {
+      footer.append(textElement("span", "ghrc-private", "Private"));
+    }
 
     const settings = document.createElement("button");
     settings.type = "button";
     settings.className = "ghrc-settings";
     settings.textContent = "Token";
     settings.title = "Configure GitHub token";
-    settings.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
+
+    settings.addEventListener("click", () => {
       configureToken();
     });
 
-    const top = document.createElement("div");
-    top.className = "ghrc-top";
-
-    const avatar = document.createElement("img");
-    avatar.className = "ghrc-avatar";
-    avatar.src = repository.owner.avatar_url;
-    avatar.alt = "";
-    avatar.referrerPolicy = "no-referrer";
-
-    const main = document.createElement("div");
-    main.className = "ghrc-main";
-
-    const nameRow = document.createElement("div");
-    nameRow.className = "ghrc-name-row";
-
-    const name = textElement("span", "ghrc-name", repository.full_name);
-    nameRow.append(name);
-
-    if (repository.private) {
-      nameRow.append(textElement("span", "ghrc-private", "Private"));
-    }
-
-    main.append(nameRow);
-
-    if (repository.description) {
-      main.append(
-        textElement("div", "ghrc-description", repository.description),
-      );
-    }
-
-    const stats = document.createElement("div");
-    stats.className = "ghrc-stats";
-
-    if (repository.language) {
-      stats.append(textElement("span", "ghrc-language", repository.language));
-    }
-
-    stats.append(
-      textElement("span", "", `★ ${formatNumber(repository.stargazers_count)}`),
-    );
-
-    stats.append(
-      textElement("span", "", `⑂ ${formatNumber(repository.forks_count)}`),
-    );
-
-    main.append(stats);
-    top.append(avatar, main);
-    card.append(settings, top);
+    footer.append(settings);
+    card.append(previewLink, footer);
 
     return card;
   }
@@ -327,7 +284,7 @@
         "Your GitHub token was rejected. Open the userscript menu and replace it.";
     } else if (error.status === 403) {
       card.textContent =
-        "GitHub denied this request. Your token may lack access, require organization approval, or be rate-limited.";
+        "GitHub denied this request. Your token may lack repository access, require organization approval, or be rate-limited.";
     } else {
       card.textContent = `Could not load repository card${error.status ? ` (${error.status})` : ""}.`;
     }
@@ -349,6 +306,7 @@
 
   async function injectCard() {
     const current = getCurrentRepository();
+
     if (!current || document.getElementById(CARD_ID)) return;
 
     const aboutSection = findAboutSection();
@@ -357,7 +315,8 @@
     const placeholder = document.createElement("div");
     placeholder.id = CARD_ID;
     placeholder.className = "ghrc-error";
-    placeholder.textContent = "Loading repository card…";
+    placeholder.textContent = "Loading social preview…";
+
     aboutSection.append(placeholder);
 
     try {
@@ -400,7 +359,9 @@
 
   injectCard();
 
-  new MutationObserver(() => injectCard()).observe(document.documentElement, {
+  new MutationObserver(() => {
+    injectCard();
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
   });
