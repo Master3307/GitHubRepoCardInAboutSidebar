@@ -32,7 +32,11 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @connect      api.github.com
+// @homepageURL  https://github.com/Master3307/GitHubRepoCardInAboutSidebar
+// @supportURL   https://github.com/Master3307/GitHubRepoCardInAboutSidebar/issues
 // @icon         https://github.com/favicon.ico
+// @updateURL    https://github.com/Master3307/GitHubRepoCardInAboutSidebar/raw/refs/heads/master/githubrepocardinaboutsidebar.user.js
+// @downloadURL  https://github.com/Master3307/GitHubRepoCardInAboutSidebar/raw/refs/heads/master/githubrepocardinaboutsidebar.user.js
 // ==/UserScript==
 
 (() => {
