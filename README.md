@@ -19,3 +19,4 @@ The two examples above show what it would look like in the About section of any 
 
 <strong>📦・Related</strong>
 - [GitHub Readme On Top Of Files](https://github.com/Master3307/GitHubReadmeOnTopOfFiles)
+- [GitHub Files Beside Readme (Experimental)](https://github.com/Master3307/GitHubFilesBesideReadme)
