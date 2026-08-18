@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Social Preview Card in About Sidebar
 // @namespace    https://github.com/
-// @version      1.6.0
+// @version      1.7.0
 // @author       MrKoby07
 // @description  Adds a repository social-preview image card directly below the About heading on GitHub repository home pages
 // @license      MIT
@@ -48,6 +48,12 @@
   const CARD_ID = "master3307-github-repo-card";
   const CACHE_PREFIX = "github_repo_card_cache:";
   const CACHE_TTL_MS = 15 * 60 * 1000;
+  const ABOUT_RETRY_ATTEMPTS = 20;
+  const ABOUT_RETRY_DELAY_MS = 100;
+
+  let navigationId = 0;
+  let retryTimer = null;
+  let observerTimer = null;
 
   GM_addStyle(`
     #${CARD_ID} {
@@ -143,7 +149,7 @@
       color: var(--fgColor-accent, #58a6ff);
     }
 
-    #${CARD_ID} .ghrc-error {
+    #${CARD_ID}.ghrc-error {
       padding: 13px;
       color: var(--fgColor-muted, #8b949e);
       font-size: 12px;
@@ -154,12 +160,9 @@
   function getCurrentRepository() {
     const parts = location.pathname.split("/").filter(Boolean);
 
-    // Only run at /owner/repository.
-    // Ignore /issues, /pulls, /blob, /settings, and other subpages.
     if (parts.length !== 2) return null;
 
     const [owner, repo] = parts;
-
     if (!owner || !repo) return null;
 
     return {
@@ -167,6 +170,13 @@
       repo,
       fullName: `${owner}/${repo}`,
     };
+  }
+
+  function isCurrentRepository(current) {
+    return (
+      location.pathname.replace(/\/$/, "") ===
+      `/${current.owner}/${current.repo}`
+    );
   }
 
   function getToken() {
@@ -187,14 +197,10 @@
 
   function toggleTokenButtonVisibility() {
     const shouldShow = !isTokenButtonVisible();
-
     setTokenButtonVisible(shouldShow);
 
     const tokenButton = document.querySelector(`#${CARD_ID} .ghrc-settings`);
-
-    if (tokenButton) {
-      tokenButton.hidden = !shouldShow;
-    }
+    if (tokenButton) tokenButton.hidden = !shouldShow;
   }
 
   function isFooterVisible() {
@@ -207,14 +213,10 @@
 
   function toggleFooterVisibility() {
     const shouldShow = !isFooterVisible();
-
     setFooterVisible(shouldShow);
 
     const footer = document.querySelector(`#${CARD_ID} .ghrc-footer`);
-
-    if (footer) {
-      footer.hidden = !shouldShow;
-    }
+    if (footer) footer.hidden = !shouldShow;
   }
 
   function cacheKey(fullName) {
@@ -303,10 +305,7 @@
 
     for (const selector of selectors) {
       const imageUrl = document.querySelector(selector)?.content?.trim();
-
-      if (imageUrl) {
-        return imageUrl;
-      }
+      if (imageUrl) return imageUrl;
     }
 
     return null;
@@ -323,6 +322,7 @@
   function makeCard(repository) {
     const card = document.createElement("div");
     card.id = CARD_ID;
+    card.dataset.repo = repository.full_name;
 
     const imageUrl = getSocialPreviewUrl(repository);
 
@@ -337,7 +337,7 @@
     preview.className = "ghrc-preview";
     preview.src = imageUrl;
     preview.alt = `${repository.full_name} social preview`;
-    preview.loading = "lazy";
+    preview.decoding = "async";
 
     preview.addEventListener("error", () => {
       preview.hidden = true;
@@ -369,10 +369,7 @@
     settings.textContent = "Token";
     settings.title = "Configure GitHub token";
     settings.hidden = !isTokenButtonVisible();
-
-    settings.addEventListener("click", () => {
-      configureToken();
-    });
+    settings.addEventListener("click", configureToken);
 
     footer.append(settings);
     card.append(previewLink, footer);
@@ -380,10 +377,11 @@
     return card;
   }
 
-  function makeErrorCard(error) {
+  function makeErrorCard(error, fullName = "") {
     const card = document.createElement("div");
     card.id = CARD_ID;
     card.className = "ghrc-error";
+    card.dataset.repo = fullName;
 
     if (error.status === 404) {
       card.textContent =
@@ -402,42 +400,103 @@
   }
 
   function findAboutHeading() {
-    const headings = [...document.querySelectorAll("h2")];
+    const sidebar =
+      document.querySelector('[data-testid="repository-sidebar"]') ||
+      document.querySelector('aside[aria-label="Repository details"]') ||
+      document.querySelector(".Layout-sidebar");
 
-    return headings.find((heading) => heading.textContent.trim() === "About");
+    const headings = sidebar
+      ? [...sidebar.querySelectorAll("h2")]
+      : [...document.querySelectorAll("h2")];
+
+    return headings.find(
+      (heading) => heading.textContent.trim().replace(/\s+/g, " ") === "About",
+    );
   }
 
-  async function injectCard() {
+  function removeExistingCard() {
+    document.getElementById(CARD_ID)?.remove();
+  }
+
+  function scheduleInject({
+    attempts = ABOUT_RETRY_ATTEMPTS,
+    delay = ABOUT_RETRY_DELAY_MS,
+  } = {}) {
+    clearTimeout(retryTimer);
+
     const current = getCurrentRepository();
-
-    if (!current || document.getElementById(CARD_ID)) return;
-
-    const aboutHeading = findAboutHeading();
-    if (!aboutHeading) return;
-
-    const placeholder = document.createElement("div");
-    placeholder.id = CARD_ID;
-    placeholder.className = "ghrc-error";
-    placeholder.textContent = "Loading social preview…";
-
-    // Place the card directly after the About heading.
-    // This puts it before the repository description and every other sidebar item.
-    aboutHeading.insertAdjacentElement("afterend", placeholder);
-
-    try {
-      const repository = await fetchRepository(current.owner, current.repo);
-
-      if (location.pathname !== `/${current.owner}/${current.repo}`) return;
-
-      placeholder.replaceWith(makeCard(repository));
-    } catch (error) {
-      placeholder.replaceWith(makeErrorCard(error));
+    if (!current) {
+      navigationId += 1;
+      removeExistingCard();
+      return;
     }
+
+    const thisNavigation = ++navigationId;
+
+    const tryInject = async (remaining) => {
+      if (thisNavigation !== navigationId || !isCurrentRepository(current)) {
+        return;
+      }
+
+      const aboutHeading = findAboutHeading();
+      const existing = document.getElementById(CARD_ID);
+
+      if (
+        existing &&
+        existing.dataset.repo === current.fullName &&
+        aboutHeading &&
+        existing.previousElementSibling === aboutHeading
+      ) {
+        return;
+      }
+
+      existing?.remove();
+
+      if (!aboutHeading) {
+        if (remaining > 0) {
+          retryTimer = setTimeout(() => tryInject(remaining - 1), delay);
+        }
+        return;
+      }
+
+      const placeholder = document.createElement("div");
+      placeholder.id = CARD_ID;
+      placeholder.className = "ghrc-error";
+      placeholder.dataset.repo = current.fullName;
+      placeholder.textContent = "Loading social preview…";
+
+      aboutHeading.insertAdjacentElement("afterend", placeholder);
+
+      try {
+        const repository = await fetchRepository(current.owner, current.repo);
+
+        if (
+          thisNavigation !== navigationId ||
+          !isCurrentRepository(current) ||
+          !placeholder.isConnected
+        ) {
+          return;
+        }
+
+        placeholder.replaceWith(makeCard(repository));
+      } catch (error) {
+        if (
+          thisNavigation !== navigationId ||
+          !isCurrentRepository(current) ||
+          !placeholder.isConnected
+        ) {
+          return;
+        }
+
+        placeholder.replaceWith(makeErrorCard(error, current.fullName));
+      }
+    };
+
+    void tryInject(attempts);
   }
 
   function configureToken() {
     const currentToken = getToken();
-
     const nextToken = prompt(
       currentToken
         ? "Paste a replacement token, or leave this blank to remove the saved token."
@@ -448,35 +507,57 @@
     if (nextToken === null) return;
 
     setToken(nextToken);
-
-    const card = document.getElementById(CARD_ID);
-
-    if (card) {
-      card.remove();
-    }
-
-    injectCard();
+    removeExistingCard();
+    scheduleInject();
   }
 
   GM_registerMenuCommand("Toggle footer visibility", toggleFooterVisibility);
-
   GM_registerMenuCommand(
     "Toggle Token button visibility",
     toggleTokenButtonVisibility,
   );
-
   GM_registerMenuCommand("Configure GitHub repo-card token", configureToken);
-
   GM_registerMenuCommand("Remove GitHub repo-card token", () => {
     setToken("");
     alert("The saved GitHub repo-card token was removed.");
+    removeExistingCard();
+    scheduleInject();
   });
 
-  injectCard();
+  document.addEventListener("turbo:load", () => {
+    removeExistingCard();
+    scheduleInject();
+  });
 
-  new MutationObserver(() => {
-    injectCard();
-  }).observe(document.documentElement, {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => scheduleInject(), {
+      once: true,
+    });
+  } else {
+    scheduleInject();
+  }
+
+  const observer = new MutationObserver(() => {
+    const current = getCurrentRepository();
+    if (!current) return;
+
+    const aboutHeading = findAboutHeading();
+    const card = document.getElementById(CARD_ID);
+    const cardIsCorrectlyPlaced =
+      card &&
+      card.dataset.repo === current.fullName &&
+      aboutHeading &&
+      card.previousElementSibling === aboutHeading;
+
+    if (!aboutHeading || cardIsCorrectlyPlaced || observerTimer) return;
+
+    observerTimer = setTimeout(() => {
+      observerTimer = null;
+      scheduleInject({ attempts: 5, delay: 150 });
+    }, 100);
+  });
+
+  observer.observe(document.documentElement, {
     childList: true,
     subtree: true,
   });
