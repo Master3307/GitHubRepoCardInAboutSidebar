@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub Social Preview Card in About Sidebar
 // @namespace    https://github.com/
-// @version      1.7.0
+// @version      1.8.0
 // @author       MrKoby07
 // @description  Adds a repository social-preview image card directly below the About heading on GitHub repository home pages
 // @license      MIT
@@ -90,10 +90,6 @@
       transition: filter 120ms ease;
     }
 
-    #${CARD_ID} .ghrc-preview[hidden] {
-      display: none;
-    }
-
     #${CARD_ID} .ghrc-footer {
       display: flex;
       align-items: center;
@@ -147,13 +143,6 @@
 
     #${CARD_ID} .ghrc-settings:hover {
       color: var(--fgColor-accent, #58a6ff);
-    }
-
-    #${CARD_ID}.ghrc-error {
-      padding: 13px;
-      color: var(--fgColor-muted, #8b949e);
-      font-size: 12px;
-      line-height: 18px;
     }
   `);
 
@@ -311,20 +300,35 @@
     return null;
   }
 
-  function getSocialPreviewUrl(repository) {
+  function getOpenGraphFallbackUrl(fullName) {
+    return `https://opengraph.githubassets.com/1/${encodeURIComponent(fullName)}`;
+  }
+
+  function getSocialPreviewUrl(
+    repository,
+    pageImageUrl = getPageSocialPreviewUrl(),
+  ) {
+    const apiImageUrl =
+      typeof repository.social_preview_image_url === "string"
+        ? repository.social_preview_image_url.trim()
+        : "";
+
     return (
-      getPageSocialPreviewUrl() ||
-      repository.social_preview_image_url ||
-      `https://opengraph.githubassets.com/1/${repository.full_name}`
+      pageImageUrl ||
+      apiImageUrl ||
+      getOpenGraphFallbackUrl(repository.full_name)
     );
   }
 
-  function makeCard(repository) {
+  function makeCard(
+    repository,
+    { pageImageUrl = getPageSocialPreviewUrl() } = {},
+  ) {
     const card = document.createElement("div");
     card.id = CARD_ID;
     card.dataset.repo = repository.full_name;
 
-    const imageUrl = getSocialPreviewUrl(repository);
+    const imageUrl = getSocialPreviewUrl(repository, pageImageUrl);
 
     const previewLink = document.createElement("a");
     previewLink.className = "ghrc-preview-link";
@@ -337,11 +341,16 @@
     preview.className = "ghrc-preview";
     preview.src = imageUrl;
     preview.alt = `${repository.full_name} social preview`;
+    preview.loading = "eager";
     preview.decoding = "async";
 
-    preview.addEventListener("error", () => {
-      preview.hidden = true;
-    });
+    preview.addEventListener(
+      "error",
+      () => {
+        previewLink.remove();
+      },
+      { once: true },
+    );
 
     previewLink.append(preview);
 
@@ -377,26 +386,55 @@
     return card;
   }
 
-  function makeErrorCard(error, fullName = "") {
-    const card = document.createElement("div");
-    card.id = CARD_ID;
-    card.className = "ghrc-error";
-    card.dataset.repo = fullName;
+  function makeQuickRepository(current, pageImageUrl) {
+    return {
+      full_name: current.fullName,
+      html_url: location.href,
+      private: false,
+      social_preview_image_url:
+        pageImageUrl || getOpenGraphFallbackUrl(current.fullName),
+    };
+  }
 
-    if (error.status === 404) {
-      card.textContent =
-        "Repository metadata is unavailable. Configure a GitHub token if this is a private repository.";
-    } else if (error.status === 401) {
-      card.textContent =
-        "Your GitHub token was rejected. Open the userscript menu and replace it.";
-    } else if (error.status === 403) {
-      card.textContent =
-        "GitHub denied this request. Your token may lack repository access, require organization approval, or be rate-limited.";
-    } else {
-      card.textContent = `Could not load repository card${error.status ? ` (${error.status})` : ""}.`;
+  function upgradeCard(card, repository, pageImageUrl) {
+    if (!card.isConnected) return;
+
+    card.dataset.repo = repository.full_name;
+
+    const imageUrl = getSocialPreviewUrl(repository, pageImageUrl);
+    const previewLink = card.querySelector(".ghrc-preview-link");
+    const preview = card.querySelector(".ghrc-preview");
+    const repoLink = card.querySelector(".ghrc-name");
+    const footer = card.querySelector(".ghrc-footer");
+    const settings = card.querySelector(".ghrc-settings");
+    const privateBadge = card.querySelector(".ghrc-private");
+
+    if (previewLink) {
+      previewLink.href = imageUrl;
     }
 
-    return card;
+    if (preview) {
+      const currentImageUrl = preview.getAttribute("src");
+      if (currentImageUrl !== imageUrl) {
+        preview.src = imageUrl;
+      }
+      preview.alt = `${repository.full_name} social preview`;
+    }
+
+    if (repoLink) {
+      repoLink.href = repository.html_url;
+      repoLink.textContent = repository.full_name;
+      repoLink.title = `Open ${repository.full_name}`;
+    }
+
+    if (repository.private && !privateBadge && footer) {
+      footer.insertBefore(
+        textElement("span", "ghrc-private", "Private"),
+        settings || null,
+      );
+    } else if (!repository.private && privateBadge) {
+      privateBadge.remove();
+    }
   }
 
   function findAboutHeading() {
@@ -459,13 +497,11 @@
         return;
       }
 
-      const placeholder = document.createElement("div");
-      placeholder.id = CARD_ID;
-      placeholder.className = "ghrc-error";
-      placeholder.dataset.repo = current.fullName;
-      placeholder.textContent = "Loading social preview…";
+      const pageImageUrl = getPageSocialPreviewUrl();
+      const quickRepository = makeQuickRepository(current, pageImageUrl);
+      const card = makeCard(quickRepository, { pageImageUrl });
 
-      aboutHeading.insertAdjacentElement("afterend", placeholder);
+      aboutHeading.insertAdjacentElement("afterend", card);
 
       try {
         const repository = await fetchRepository(current.owner, current.repo);
@@ -473,22 +509,14 @@
         if (
           thisNavigation !== navigationId ||
           !isCurrentRepository(current) ||
-          !placeholder.isConnected
+          !card.isConnected
         ) {
           return;
         }
 
-        placeholder.replaceWith(makeCard(repository));
-      } catch (error) {
-        if (
-          thisNavigation !== navigationId ||
-          !isCurrentRepository(current) ||
-          !placeholder.isConnected
-        ) {
-          return;
-        }
-
-        placeholder.replaceWith(makeErrorCard(error, current.fullName));
+        upgradeCard(card, repository, pageImageUrl);
+      } catch {
+        // Keep the immediately rendered page-metadata/Open Graph card.
       }
     };
 
