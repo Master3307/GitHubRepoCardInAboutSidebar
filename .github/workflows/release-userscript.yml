@@ -1,0 +1,495 @@
+name: Release userscript
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What should this workflow do?"
+        required: true
+        default: "release-current"
+        type: choice
+        options:
+          - release-current
+          - backfill-missing
+      backfill_limit:
+        description: "Maximum number of missing historical releases to create"
+        required: false
+        default: "10"
+        type: string
+      dry_run:
+        description: "Preview backfill actions without creating tags or releases"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: userscript-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip release]')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Detect userscript file
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          matches=()
+
+          for file in ./*.user.js; do
+            [ -f "$file" ] || continue
+            if grep -q '^// ==UserScript==$' "$file"; then
+              matches+=("$file")
+            fi
+          done
+
+          for file in ./*.js; do
+            [ -f "$file" ] || continue
+            [[ "$file" == *.user.js ]] && continue
+            if grep -q '^// ==UserScript==$' "$file"; then
+              matches+=("$file")
+            fi
+          done
+
+          if [ "${#matches[@]}" -eq 0 ]; then
+            echo "No userscript file found in repository root."
+            exit 1
+          fi
+
+          if [ "${#matches[@]}" -gt 1 ]; then
+            echo "More than one userscript file was found. Keep exactly one userscript in the repository root or change this workflow to use an explicit path."
+            printf 'Found: %s\n' "${matches[@]}"
+            exit 1
+          fi
+
+          found="${matches[0]}"
+          version="$(sed -nE 's|^[[:space:]]*//[[:space:]]*@version[[:space:]]+([^[:space:]]+).*|\1|p' "$found" | head -n 1)"
+
+          if [ -z "$version" ]; then
+            echo "No @version found in $found"
+            exit 1
+          fi
+
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version '$version'. Expected a SemVer-like version such as 1.2.3."
+            exit 1
+          fi
+
+          original_name="$(basename "$found")"
+
+          if [[ "$original_name" == *.user.js ]]; then
+            release_file="$found"
+            release_name="$original_name"
+          else
+            base_name="$(basename "$found" .js)"
+            release_name="${base_name}.user.js"
+            cp "$found" "./$release_name"
+            release_file="./$release_name"
+          fi
+
+          tag="v$version"
+
+          echo "file=$found" >> "$GITHUB_OUTPUT"
+          echo "repo_path=${found#./}" >> "$GITHUB_OUTPUT"
+          echo "original_name=$original_name" >> "$GITHUB_OUTPUT"
+          echo "release_file=$release_file" >> "$GITHUB_OUTPUT"
+          echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch remote tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+
+      - name: Backfill missing historical releases
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'backfill-missing'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_PATH: ${{ steps.detect.outputs.repo_path }}
+          RELEASE_NAME: ${{ steps.detect.outputs.release_name }}
+          BACKFILL_LIMIT: ${{ inputs.backfill_limit }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$BACKFILL_LIMIT" =~ ^[1-9][0-9]*$ ]]; then
+            echo "backfill_limit must be a positive integer; got: $BACKFILL_LIMIT"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          declare -A version_commit
+          declare -A version_content
+          declare -A version_seen
+          versions=()
+
+          # Git walks backwards so --follow can resolve previous filenames.
+          # Each record contains a commit and the file path valid in that commit.
+          separator=$'\x1f'
+
+          mapfile -t history_newest_first < <(
+            git log \
+              --follow \
+              -M \
+              --format="${separator}%H" \
+              --name-only \
+              -- "$REPO_PATH" |
+            awk -v sep="$separator" '
+              function emit() {
+                if (commit != "" && path != "") {
+                  print commit sep path
+                }
+              }
+
+              index($0, sep) == 1 {
+                emit()
+                commit = substr($0, 2)
+                path = ""
+                next
+              }
+
+              NF && path == "" {
+                path = $0
+              }
+
+              END {
+                emit()
+              }
+            '
+          )
+
+          if [ "${#history_newest_first[@]}" -eq 0 ]; then
+            echo "Could not find file history for $REPO_PATH."
+            exit 1
+          fi
+
+          # Reverse Git's resolved rename history after collection. This allows
+          # version targets to be selected from oldest to newest.
+          history=()
+          for ((index=${#history_newest_first[@]} - 1; index>=0; index--)); do
+            history+=("${history_newest_first[$index]}")
+          done
+
+          for entry in "${history[@]}"; do
+            commit="${entry%%"$separator"*}"
+            historical_path="${entry#*"$separator"}"
+
+            content="$(git show "${commit}:${historical_path}" 2>/dev/null || true)"
+            [ -n "$content" ] || continue
+
+            # The historical file must itself be a userscript at this commit.
+            grep -q '^// ==UserScript==$' <<< "$content" || continue
+
+            version="$(
+              sed -nE \
+                's|^[[:space:]]*//[[:space:]]*@version[[:space:]]+([^[:space:]]+).*|\1|p' \
+                <<< "$content" |
+              head -n 1
+            )"
+
+            [ -n "$version" ] || continue
+
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Skipping historical commit $commit at $historical_path: invalid version '$version'."
+              continue
+            fi
+
+            # Keep the first commit that declares each version.
+            if [[ -z "${version_seen[$version]+x}" ]]; then
+              version_seen["$version"]=1
+              version_commit["$version"]="$commit"
+              version_content["$version"]="$content"
+              versions+=("$version")
+            fi
+          done
+
+          created=0
+          skipped=0
+          conflicts=0
+          planned=0
+          summary_file="$(mktemp)"
+
+          {
+            echo "## Userscript historical backfill"
+            echo
+            echo "- Release asset: \`$RELEASE_NAME\`"
+            echo "- Rename tracking: enabled"
+            echo "- Dry run: \`$DRY_RUN\`"
+            echo "- Maximum releases: \`$BACKFILL_LIMIT\`"
+            echo "- Order: oldest version to newest version"
+            echo "- Latest release: preserved; historical releases are never Latest"
+            echo
+          } > "$summary_file"
+
+          # Historical versions are emitted in oldest-to-newest order. Every
+          # backfilled release is explicitly marked non-latest.
+          for ((index=0; index<${#versions[@]}; index++)); do
+            version="${versions[$index]}"
+            commit="${version_commit[$version]}"
+            content="${version_content[$version]}"
+            tag="v$version"
+
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "- Skipped \`$tag\`: release already exists." >> "$summary_file"
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            git fetch --force --tags origin
+            existing_tag_commit=""
+
+            if git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null 2>&1; then
+              existing_tag_commit="$(git rev-list -n 1 "$tag")"
+
+              if [ "$existing_tag_commit" != "$commit" ]; then
+                echo "- Conflict \`$tag\`: existing tag points to \`${existing_tag_commit:0:7}\`, expected \`${commit:0:7}\`." >> "$summary_file"
+                conflicts=$((conflicts + 1))
+                continue
+              fi
+            fi
+
+            planned=$((planned + 1))
+
+            previous_tag=""
+            if [ "$index" -gt 0 ]; then
+              previous_tag="v${versions[$((index - 1))]}"
+            fi
+
+            notes_file="$(mktemp)"
+            {
+              echo "## What's changed"
+              echo
+
+              if [ -n "$previous_tag" ]; then
+                git log "${previous_tag}..${commit}" --pretty=format:'- %s (%h)' || true
+              else
+                git log "$commit" --pretty=format:'- %s (%h)' || true
+              fi
+
+              echo
+              if [ -n "$previous_tag" ]; then
+                echo
+                echo "**Full Changelog**: ${REPOSITORY_URL}/compare/${previous_tag}...${tag}"
+              fi
+            } > "$notes_file"
+
+            if [ "$DRY_RUN" = "true" ]; then
+              if [ -n "$existing_tag_commit" ]; then
+                echo "- Would create release \`$tag\` from existing matching tag at \`${commit:0:7}\` (not Latest)." >> "$summary_file"
+              else
+                echo "- Would create tag and release \`$tag\` at \`${commit:0:7}\` (not Latest)." >> "$summary_file"
+              fi
+            else
+              if [ -z "$existing_tag_commit" ]; then
+                git tag -a "$tag" "$commit" -m "Release $tag"
+                git push origin "refs/tags/$tag"
+              fi
+
+              tmp_asset="$(mktemp --suffix=.user.js)"
+              printf '%s\n' "$content" > "$tmp_asset"
+
+              gh release create "$tag" \
+                --title "$tag" \
+                --notes-file "$notes_file" \
+                --latest=false \
+                --verify-tag \
+                "${tmp_asset}#${RELEASE_NAME}"
+
+              rm -f "$tmp_asset"
+              echo "- Created \`$tag\` at \`${commit:0:7}\` (not Latest)." >> "$summary_file"
+              created=$((created + 1))
+            fi
+
+            rm -f "$notes_file"
+
+            if [ "$planned" -ge "$BACKFILL_LIMIT" ]; then
+              break
+            fi
+          done
+
+          {
+            echo
+            echo "### Result"
+            echo
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "- Planned releases: \`$planned\`"
+            else
+              echo "- Created releases: \`$created\`"
+            fi
+            echo "- Skipped existing releases: \`$skipped\`"
+            echo "- Tag conflicts: \`$conflicts\`"
+          } >> "$summary_file"
+
+          cat "$summary_file" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$conflicts" -gt 0 ]; then
+            echo "Historical backfill found tag conflicts. No conflicting releases were created."
+            exit 1
+          fi
+
+      - name: Inspect current release state
+        id: current
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'release-current')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.detect.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "already_released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null 2>&1; then
+            echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+            echo "tag_commit=$(git rev-list -n 1 "$TAG")" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            echo "tag_commit=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or validate current tag
+        id: tag
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'release-current')) && steps.current.outputs.already_released == 'false'
+        env:
+          TAG: ${{ steps.detect.outputs.tag }}
+          TAG_EXISTS: ${{ steps.current.outputs.tag_exists }}
+          TAG_COMMIT: ${{ steps.current.outputs.tag_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          expected_commit="$(git rev-parse HEAD)"
+
+          if [ "$TAG_EXISTS" = "true" ]; then
+            if [ "$TAG_COMMIT" != "$expected_commit" ]; then
+              echo "Tag $TAG already exists at $TAG_COMMIT, but this workflow is releasing $expected_commit."
+              echo "Bump @version before releasing a different commit."
+              exit 1
+            fi
+
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag -a "$TAG" "$expected_commit" -m "Release $TAG"
+            git push origin "refs/tags/$TAG"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "commit=$expected_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Build current release notes
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'release-current')) && steps.current.outputs.already_released == 'false'
+        id: notes
+        env:
+          CURRENT_TAG: ${{ steps.detect.outputs.tag }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          previous_tag="$(git tag --merged HEAD --sort=-version:refname | grep -Fxv "$CURRENT_TAG" | head -n 1 || true)"
+          notes_file="$(mktemp)"
+
+          {
+            echo "## What's changed"
+            echo
+
+            if [ -n "$previous_tag" ]; then
+              git log "$previous_tag..HEAD" --pretty=format:'- %s (%h)'
+            else
+              git log HEAD --pretty=format:'- %s (%h)'
+            fi
+
+            echo
+            if [ -n "$previous_tag" ]; then
+              echo
+              echo "**Full Changelog**: [${REPOSITORY_URL}/compare/${previous_tag}...${CURRENT_TAG}](${REPOSITORY_URL}/compare/${previous_tag}...${CURRENT_TAG})"
+            fi
+          } > "$notes_file"
+
+          {
+            echo "file<<EOF"
+            cat "$notes_file"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          rm -f "$notes_file"
+
+      - name: Create current release
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'release-current')) && steps.current.outputs.already_released == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.detect.outputs.tag }}
+          RELEASE_NAME: ${{ steps.detect.outputs.release_name }}
+          RELEASE_FILE: ${{ steps.detect.outputs.release_file }}
+          RELEASE_NOTES: ${{ steps.notes.outputs.file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          notes_file="$(mktemp)"
+          printf '%s\n' "$RELEASE_NOTES" > "$notes_file"
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file "$notes_file" \
+            --latest=true \
+            --verify-tag \
+            "${RELEASE_FILE}#${RELEASE_NAME}"
+
+          rm -f "$notes_file"
+
+      - name: Write current release summary
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'release-current')
+        env:
+          TAG: ${{ steps.detect.outputs.tag }}
+          VERSION: ${{ steps.detect.outputs.version }}
+          RELEASE_NAME: ${{ steps.detect.outputs.release_name }}
+          RELEASED: ${{ steps.current.outputs.already_released }}
+          TAG_COMMIT: ${{ steps.tag.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Userscript release"
+            echo
+            echo "- Release asset: \`$RELEASE_NAME\`"
+            echo "- Version: \`$VERSION\`"
+            echo "- Tag: \`$TAG\`"
+            if [ "$RELEASED" = "true" ]; then
+              echo "- Result: release already existed; nothing was changed."
+            else
+              echo "- Result: release created from \`${TAG_COMMIT:0:7}\` and marked as Latest."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
